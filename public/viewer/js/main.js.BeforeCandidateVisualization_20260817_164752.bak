@@ -1,0 +1,644 @@
+﻿import { getServerConfig, getRTCConfiguration } from "../../js/config.js";
+import { createDisplayStringArray } from "../../js/stats.js";
+import { VideoPlayer } from "../../js/videoplayer.js";
+import { RenderStreaming } from "../../module/renderstreaming.js";
+import { Signaling, WebSocketSignaling } from "../../module/signaling.js";
+import { ingestObjectCatalog } from "./object-catalog.js";
+import { createSemanticMatchController } from "./semantic-match-ui.js";
+
+/** @type {Element} */
+let playButton;
+/** @type {RenderStreaming} */
+let renderstreaming;
+/** @type {boolean} */
+let useWebSocket;
+/** @type {WebSocket | null} */
+let gazeSocket = null;
+/** @type {number | null} */
+let gazeReconnectTimer = null;
+/** @type {boolean} */
+let pageClosing = false;
+/** @type {RTCDataChannel | null} */
+let gazeDataChannel = null;
+/** @type {RTCDataChannel | null} */
+let guidanceDataChannel = null;
+/** @type {Array<object>} */
+let semanticObjectCatalog = [];
+let semanticMatchController;
+
+const codecPreferences = document.getElementById('codecPreferences');
+const guidanceModeSelect = document.getElementById('guidanceMode');
+const clearGuidanceButton = document.getElementById('clearGuidanceButton');
+const guidanceStatus = document.getElementById('guidanceStatus');
+const trialIdInput = document.getElementById('trialIdInput');
+const startTrialButton = document.getElementById('startTrialButton');
+const semanticObjectSelect = document.getElementById('semanticObjectSelect');
+const refreshObjectsButton = document.getElementById('refreshObjectsButton');
+const confirmTargetButton = document.getElementById('confirmTargetButton');
+const completeTrialButton = document.getElementById('completeTrialButton');
+const objectControlStatus = document.getElementById('objectControlStatus');
+const supportsSetCodecPreferences = window.RTCRtpTransceiver &&
+  'setCodecPreferences' in window.RTCRtpTransceiver.prototype;
+const messageDiv = document.getElementById('message');
+messageDiv.style.display = 'none';
+
+const playerDiv = document.getElementById('player');
+const lockMouseCheck = document.getElementById('lockMouseCheck');
+const videoPlayer = new VideoPlayer();
+
+setup();
+connectGazeWebSocket();
+setupGuidanceControls();
+setupObjectControls();
+setupSemanticMatcher();
+
+window.document.oncontextmenu = function () {
+  return false;     // cancel default menu
+};
+
+window.addEventListener('resize', function () {
+  videoPlayer.resizeVideo();
+}, true);
+
+window.addEventListener('beforeunload', async () => {
+  pageClosing = true;
+  if (gazeSocket) {
+    gazeSocket.close();
+  }
+  if(!renderstreaming)
+    return;
+  await renderstreaming.stop();
+}, true);
+
+function connectGazeWebSocket() {
+  if (gazeSocket && (gazeSocket.readyState === WebSocket.OPEN || gazeSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  gazeSocket = new WebSocket('ws://127.0.0.1:8765/gaze');
+
+  gazeSocket.onopen = () => {
+    if (gazeReconnectTimer) {
+      clearTimeout(gazeReconnectTimer);
+      gazeReconnectTimer = null;
+    }
+    console.log('Tobii gaze WebSocket connected.');
+  };
+
+  gazeSocket.onmessage = (event) => {
+    try {
+      const gaze = JSON.parse(event.data);
+      const mappedGaze = mapGazeToVideoViewport(gaze);
+      sendGazeToUnity(mappedGaze);
+    } catch (error) {
+      console.warn('Ignored malformed gaze message.', error);
+    }
+  };
+
+  gazeSocket.onerror = () => {
+    gazeSocket.close();
+  };
+
+  gazeSocket.onclose = () => {
+    gazeSocket = null;
+
+    if (pageClosing) {
+      return;
+    }
+
+    // The Python Tobii bridge may be started after the viewer page.
+    // Keep retrying so Unity begins receiving gaze as soon as the bridge is available.
+    if (!gazeReconnectTimer) {
+      gazeReconnectTimer = window.setTimeout(() => {
+        gazeReconnectTimer = null;
+        connectGazeWebSocket();
+      }, 1000);
+    }
+  };
+}
+
+function mapGazeToVideoViewport(gaze) {
+  if (!gaze || !gaze.valid) {
+    return {
+      type: 'gaze',
+      valid: false,
+      timestamp_us: gaze ? gaze.timestamp_us : null,
+      pc_time_unix: gaze ? gaze.pc_time_unix : null,
+      raw: gaze
+    };
+  }
+
+  const targetElement = videoPlayer.videoElement || playerDiv;
+  const targetRect = targetElement.getBoundingClientRect();
+
+  // Tobii gives display-normalized coordinates. Convert them into browser
+  // client pixels by estimating the viewport origin inside the OS window.
+  // This is most accurate when the viewer browser is maximized or fullscreen.
+  const screenX = gaze.x * window.screen.width;
+  const screenY = gaze.y * window.screen.height;
+  const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+  const viewportLeft = window.screenX + borderX;
+  const viewportTop = window.screenY + Math.max(0, window.outerHeight - window.innerHeight - borderX);
+  const clientX = screenX - viewportLeft;
+  const clientY = screenY - viewportTop;
+
+  const videoX = (clientX - targetRect.left) / targetRect.width;
+  const videoY = (clientY - targetRect.top) / targetRect.height;
+  const insideVideo = videoX >= 0 && videoY >= 0 && videoX <= 1 && videoY <= 1;
+
+  if (!insideVideo) {
+    return {
+      type: 'gaze',
+      valid: false,
+      timestamp_us: gaze.timestamp_us,
+      pc_time_unix: gaze.pc_time_unix,
+      raw: gaze
+    };
+  }
+
+  return {
+    type: 'gaze',
+    valid: true,
+    timestamp_us: gaze.timestamp_us,
+    pc_time_unix: gaze.pc_time_unix,
+    // Unity viewport coordinates use bottom-left origin, so Y is flipped here.
+    x: videoX,
+    y: 1 - videoY,
+    videoX: videoX,
+    videoY: videoY,
+    raw: gaze
+  };
+}
+
+async function setup() {
+  const res = await getServerConfig();
+  useWebSocket = res.useWebSocket;
+  showWarningIfNeeded(res.startupMode);
+  showCodecSelect();
+  showPlayButton();
+}
+
+function showWarningIfNeeded(startupMode) {
+  const warningDiv = document.getElementById("warning");
+  if (startupMode == "private") {
+    warningDiv.innerHTML = "<h4>Warning</h4> This sample is not working on Private Mode.";
+    warningDiv.hidden = false;
+  }
+}
+
+function showPlayButton() {
+  if (!document.getElementById('playButton')) {
+    const elementPlayButton = document.createElement('img');
+    elementPlayButton.id = 'playButton';
+    elementPlayButton.src = '../../images/Play.png';
+    elementPlayButton.alt = 'Start Streaming';
+    playButton = document.getElementById('player').appendChild(elementPlayButton);
+    playButton.addEventListener('click', onClickPlayButton);
+  }
+}
+
+function onClickPlayButton() {
+  playButton.style.display = 'none';
+
+  // add video player
+  videoPlayer.createPlayer(playerDiv, lockMouseCheck);
+  setupRenderStreaming();
+}
+
+async function setupRenderStreaming() {
+  codecPreferences.disabled = true;
+
+  const signaling = useWebSocket ? new WebSocketSignaling() : new Signaling();
+  const config = getRTCConfiguration();
+  renderstreaming = new RenderStreaming(signaling, config);
+  renderstreaming.onConnect = onConnect;
+  renderstreaming.onDisconnect = onDisconnect;
+  renderstreaming.onTrackEvent = (data) => videoPlayer.addTrack(data.track);
+  renderstreaming.onGotOffer = setCodecPreferences;
+
+  await renderstreaming.start();
+  await renderstreaming.createConnection();
+}
+
+function onConnect() {
+  const inputChannel = renderstreaming.createDataChannel("input");
+  videoPlayer.setupInput(inputChannel);
+
+  // Render Streaming 3.1 binds remote channels to the first receiver that is
+  // not Open yet. Create them one at a time so input, gaze, and guidance are
+  // deterministically assigned to their matching Unity receivers.
+  if (inputChannel.readyState === 'open') {
+    setupGazeDataChannel();
+  } else {
+    inputChannel.addEventListener('open', setupGazeDataChannel, { once: true });
+  }
+
+  showStatsMessage();
+}
+
+function setupGazeDataChannel() {
+  if (gazeDataChannel) {
+    return;
+  }
+
+  // Do not mix JSON gaze packets into the existing "input" channel.
+  // Unity's InputReceiver expects binary InputSystem messages there.
+  gazeDataChannel = renderstreaming.createDataChannel("gaze");
+  gazeDataChannel.addEventListener('open', () => {
+    console.log('Gaze DataChannel open.');
+    setupGuidanceDataChannel();
+  }, { once: true });
+  gazeDataChannel.onclose = () => console.log('Gaze DataChannel closed.');
+
+  if (gazeDataChannel.readyState === 'open') {
+    setupGuidanceDataChannel();
+  }
+}
+
+function setupGuidanceControls() {
+  guidanceModeSelect.addEventListener('change', () => {
+    sendGuidanceCommand({
+      type: 'set_guidance_mode',
+      mode: guidanceModeSelect.value
+    });
+  });
+
+  clearGuidanceButton.addEventListener('click', () => {
+    sendGuidanceCommand({
+      type: 'clear_guidance'
+    });
+  });
+}
+
+function setupObjectControls() {
+  startTrialButton.addEventListener('click', () => {
+    if (!trialIdInput.value.trim()) {
+      trialIdInput.value = `trial-${Date.now()}`;
+    }
+    setObjectControlStatus('正在开始试次…', 'pending');
+    sendGuidanceCommand({
+      type: 'start_trial',
+      trialId: trialIdInput.value.trim(),
+      condition: 'database_id_highlight',
+      mode: 'highlight'
+    });
+  });
+
+  refreshObjectsButton.addEventListener('click', requestObjectCatalog);
+
+  semanticObjectSelect.addEventListener('change', () => {
+    confirmTargetButton.disabled = !semanticObjectSelect.value;
+  });
+
+  confirmTargetButton.addEventListener('click', () => {
+    const targetId = semanticObjectSelect.value;
+    if (!targetId) {
+      setObjectControlStatus('请先选择一个目标物体', 'error');
+      return;
+    }
+    setObjectControlStatus(`正在确认 ${targetId}…`, 'pending');
+    sendGuidanceCommand({
+      type: 'select_target',
+      trialId: trialIdInput.value.trim(),
+      targetId: targetId,
+      mode: 'highlight'
+    });
+  });
+
+  completeTrialButton.addEventListener('click', () => {
+    sendGuidanceCommand({
+      type: 'complete_trial',
+      trialId: trialIdInput.value.trim()
+    });
+  });
+}
+
+function setupSemanticMatcher() {
+  semanticMatchController = createSemanticMatchController({
+    form: document.getElementById('semanticMatchForm'),
+    input: document.getElementById('semanticQueryInput'),
+    submitButton: document.getElementById('matchSemanticButton'),
+    status: document.getElementById('semanticMatchStatus'),
+    results: document.getElementById('semanticMatchResults'),
+    slots: document.getElementById('semanticSlots'),
+    preferredId: document.getElementById('semanticPreferredId'),
+    candidateTable: document.getElementById('semanticCandidateTable'),
+    candidateBody: document.getElementById('semanticCandidateBody'),
+    emptyCandidates: document.getElementById('semanticEmptyCandidates'),
+    rejectedSection: document.getElementById('semanticRejectedSection'),
+    rejectedList: document.getElementById('semanticRejectedList')
+  }, {
+    onCandidateSelected: selectSemanticObject
+  });
+}
+
+function selectSemanticObject(targetId) {
+  const hasTarget = semanticObjectCatalog.some(object =>
+    object.id === targetId);
+  if (!hasTarget) {
+    return;
+  }
+
+  const hasOption = Array.from(semanticObjectSelect.options)
+    .some(option => option.value === targetId);
+  if (!hasOption) {
+    updateSemanticObjectSelect(semanticObjectCatalog);
+  }
+
+  semanticObjectSelect.value = targetId;
+  confirmTargetButton.disabled = false;
+}
+
+function requestObjectCatalog() {
+  setObjectControlStatus('正在读取 Unity 物体目录…', 'pending');
+  sendGuidanceCommand({ type: 'get_object_catalog' });
+}
+
+function setupGuidanceDataChannel() {
+  // Keep the creation order aligned with Unity Broadcast.streams:
+  // input, gaze, then guidance.
+  guidanceDataChannel = renderstreaming.createDataChannel("guidance");
+  guidanceDataChannel.onopen = () => {
+    setGuidanceStatus('Unity 已连接，正在应用提示方法…', 'pending');
+    sendGuidanceCommand({
+      type: 'set_guidance_mode',
+      mode: guidanceModeSelect.value
+    });
+    requestObjectCatalog();
+  };
+  guidanceDataChannel.onclose = () => {
+    setGuidanceStatus('Unity 提示通道已断开', 'disconnected');
+  };
+  guidanceDataChannel.onmessage = (event) => {
+    try {
+      const response = JSON.parse(event.data);
+      handleGuidanceResponse(response);
+    } catch (error) {
+      console.warn('Ignored malformed guidance response.', error);
+    }
+  };
+}
+
+function sendGuidanceCommand(command) {
+  if (!guidanceDataChannel ||
+      guidanceDataChannel.readyState !== 'open') {
+    setGuidanceStatus('请先连接 Unity 串流', 'disconnected');
+    return false;
+  }
+
+  guidanceDataChannel.send(JSON.stringify(command));
+  return true;
+}
+
+function handleGuidanceResponse(response) {
+  if (!response) {
+    return;
+  }
+
+  const modeLabels = {
+    none: '无提示',
+    highlight: '物体高亮'
+  };
+  const label = modeLabels[response.mode] || response.mode || '';
+
+  if (response.type === 'object_catalog' ||
+      response.type === 'object_candidates') {
+    const catalogResult = ingestObjectCatalog(response.candidates, {
+      declaredCount: response.candidateCount
+    });
+    if (!response.ok || !catalogResult.ok) {
+      const validationMessage = catalogResult.errors.length
+        ? catalogResult.errors[0].message
+        : response.message || 'Unity 物体目录读取失败';
+      console.error('Rejected invalid Unity object catalog.', {
+        response,
+        errors: catalogResult.errors
+      });
+      setObjectControlStatus(`物体目录校验失败：${validationMessage}`, 'error');
+      return;
+    }
+
+    if (response.type === 'object_catalog') {
+      semanticObjectCatalog = catalogResult.objects;
+    }
+    const displayedObjects = response.type === 'object_catalog'
+      ? semanticObjectCatalog
+      : catalogResult.objects;
+    updateSemanticObjectSelect(displayedObjects);
+    if (response.type === 'object_catalog') {
+      semanticMatchController.setCatalog(semanticObjectCatalog);
+    }
+    setObjectControlStatus(
+      `PC 已校验并缓存 ${displayedObjects.length} 个实验物体`,
+      'ready');
+    return;
+  }
+
+  if (response.type === 'guidance_target_shown') {
+    setGuidanceStatus(
+      `${label}：${response.targetName || '目标'} 已显示`,
+      response.ok ? 'ready' : 'error');
+    setObjectControlStatus(
+      `已确认并高亮：${response.targetId || response.targetName || '目标'}`,
+      response.ok ? 'ready' : 'error');
+    return;
+  }
+
+  if (response.type === 'trial_ready') {
+    if (response.trialId) {
+      trialIdInput.value = response.trialId;
+    }
+    setObjectControlStatus(
+      `试次 ${response.trialId || ''} 已开始`,
+      response.ok ? 'ready' : 'error');
+  }
+
+  if (response.type === 'trial_completed') {
+    setObjectControlStatus('试次已完成，日志已保存', 'ready');
+    return;
+  }
+
+  if (response.type === 'guidance_target_cleared' ||
+      response.type === 'guidance_cleared') {
+    setGuidanceStatus(`${label}：目标已清除`, 'ready');
+    return;
+  }
+
+  if (response.type === 'guidance_ready' ||
+      response.type === 'guidance_mode_applied' ||
+      response.type === 'trial_ready') {
+    setGuidanceStatus(
+      response.ok ? `${label} 已在 Unity 中生效` : response.message,
+      response.ok ? 'ready' : 'error');
+    return;
+  }
+
+  if (!response.ok || response.type === 'guidance_error') {
+    setGuidanceStatus(response.message || 'Unity 提示命令失败', 'error');
+    setObjectControlStatus(response.message || 'Unity 命令失败', 'error');
+  }
+}
+
+function updateSemanticObjectSelect(objects) {
+  const previousValue = semanticObjectSelect.value;
+  semanticObjectSelect.innerHTML = '';
+
+  if (!objects.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '场景中没有已注册的实验物体';
+    semanticObjectSelect.appendChild(option);
+    semanticObjectSelect.disabled = true;
+    confirmTargetButton.disabled = true;
+    return;
+  }
+
+  objects.forEach((object) => {
+    const option = document.createElement('option');
+    option.value = object.id;
+    const attributes = [object.category, object.color]
+      .filter(Boolean)
+      .join(' / ');
+    option.textContent = `${object.displayName || object.id} (${object.id})` +
+      (attributes ? ` — ${attributes}` : '');
+    semanticObjectSelect.appendChild(option);
+  });
+
+  semanticObjectSelect.disabled = false;
+  semanticObjectSelect.value = objects.some(object => object.id === previousValue)
+    ? previousValue
+    : objects[0].id;
+  confirmTargetButton.disabled = false;
+}
+
+function setGuidanceStatus(message, state) {
+  guidanceStatus.textContent = message;
+  guidanceStatus.dataset.state = state;
+}
+
+function setObjectControlStatus(message, state) {
+  objectControlStatus.textContent = message;
+  objectControlStatus.dataset.state = state;
+}
+
+function sendGazeToUnity(gaze) {
+  if (!gaze || !gazeDataChannel || gazeDataChannel.readyState !== 'open') {
+    return;
+  }
+
+  const payload = {
+    type: 'gaze',
+    valid: gaze.valid,
+    timestamp_us: gaze.timestamp_us,
+    pc_time_unix: gaze.pc_time_unix
+  };
+
+  if (gaze.valid) {
+    payload.x = gaze.x;
+    payload.y = gaze.y;
+    payload.videoX = gaze.videoX;
+    payload.videoY = gaze.videoY;
+  }
+
+  gazeDataChannel.send(JSON.stringify(payload));
+}
+
+async function onDisconnect(connectionId) {
+  clearStatsMessage();
+  messageDiv.style.display = 'block';
+  messageDiv.innerText = `Disconnect peer on ${connectionId}.`;
+
+  await renderstreaming.stop();
+  renderstreaming = null;
+  gazeDataChannel = null;
+  guidanceDataChannel = null;
+  semanticObjectCatalog = [];
+  semanticMatchController.setCatalog([]);
+  setGuidanceStatus('Unity 提示通道已断开', 'disconnected');
+  setObjectControlStatus('Unity 提示通道已断开', 'disconnected');
+  videoPlayer.deletePlayer();
+  if (supportsSetCodecPreferences) {
+    codecPreferences.disabled = false;
+  }
+  showPlayButton();
+}
+
+function setCodecPreferences() {
+  /** @type {RTCRtpCodecCapability[] | null} */
+  let selectedCodecs = null;
+  if (supportsSetCodecPreferences) {
+    const preferredCodec = codecPreferences.options[codecPreferences.selectedIndex];
+    if (preferredCodec.value !== '') {
+      const [mimeType, sdpFmtpLine] = preferredCodec.value.split(' ');
+      const { codecs } = RTCRtpSender.getCapabilities('video');
+      const selectedCodecIndex = codecs.findIndex(c => c.mimeType === mimeType && c.sdpFmtpLine === sdpFmtpLine);
+      const selectCodec = codecs[selectedCodecIndex];
+      selectedCodecs = [selectCodec];
+    }
+  }
+
+  if (selectedCodecs == null) {
+    return;
+  }
+  const transceivers = renderstreaming.getTransceivers().filter(t => t.receiver.track.kind == "video");
+  if (transceivers && transceivers.length > 0) {
+    transceivers.forEach(t => t.setCodecPreferences(selectedCodecs));
+  }
+}
+
+function showCodecSelect() {
+  if (!supportsSetCodecPreferences) {
+    messageDiv.style.display = 'block';
+    messageDiv.innerHTML = `Current Browser does not support <a href="https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpTransceiver/setCodecPreferences">RTCRtpTransceiver.setCodecPreferences</a>.`;
+    return;
+  }
+
+  const codecs = RTCRtpSender.getCapabilities('video').codecs;
+  codecs.forEach(codec => {
+    if (['video/red', 'video/ulpfec', 'video/rtx'].includes(codec.mimeType)) {
+      return;
+    }
+    const option = document.createElement('option');
+    option.value = (codec.mimeType + ' ' + (codec.sdpFmtpLine || '')).trim();
+    option.innerText = option.value;
+    codecPreferences.appendChild(option);
+  });
+  codecPreferences.disabled = false;
+}
+
+/** @type {RTCStatsReport} */
+let lastStats;
+/** @type {number} */
+let intervalId;
+
+function showStatsMessage() {
+  intervalId = setInterval(async () => {
+    if (renderstreaming == null) {
+      return;
+    }
+
+    const stats = await renderstreaming.getStats();
+    if (stats == null) {
+      return;
+    }
+
+    const array = createDisplayStringArray(stats, lastStats);
+    if (array.length) {
+      messageDiv.style.display = 'block';
+      messageDiv.innerHTML = array.join('<br>');
+    }
+    lastStats = stats;
+  }, 1000);
+}
+
+function clearStatsMessage() {
+  if (intervalId) {
+    clearInterval(intervalId);
+  }
+  lastStats = null;
+  intervalId = null;
+  messageDiv.style.display = 'none';
+  messageDiv.innerHTML = '';
+}
+
+

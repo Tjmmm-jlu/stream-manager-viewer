@@ -1,0 +1,22 @@
+#sequenceControls {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#sequenceStatus {
+  min-width: 320px;
+  font-size: 14px;
+  color: #b7b7b7;
+}
+
+#sequenceStatus[data-state="ready"] {
+  color: #50c878;
+}
+
+#sequenceStatus[data-state="pending"] {
+  color: #f2c94c;
+}
+
+#sequenceStatus[data-state="error"] {
+  color: #ff6b6b;
+}

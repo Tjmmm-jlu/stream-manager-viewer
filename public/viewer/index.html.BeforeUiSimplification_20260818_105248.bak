@@ -1,0 +1,126 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <link rel="icon" href="../images/favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="../css/main.css" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/preparation.css" />
+  <title>PICO Preparation Experiment</title>
+</head>
+
+<body>
+
+  <div id="container">
+    <h1>PICO 制备实验</h1>
+
+    <div id="warning" hidden="true"></div>
+    <div id="player"></div>
+
+    <div id="guidanceControls" class="box guidance-controls">
+      <label for="guidanceMode">提示方法：</label>
+      <select id="guidanceMode" autocomplete="off">
+        <option value="highlight" selected>物体高亮</option>
+      </select>
+      <button id="clearGuidanceButton" type="button">清除目标</button>
+      <span id="guidanceStatus" data-state="disconnected">请先连接 Unity 串流</span>
+    </div>
+
+    <div id="objectControls" class="box object-controls">
+      <strong>A 阶段目标控制：</strong>
+      <label for="trialIdInput">试次</label>
+      <input id="trialIdInput" type="text" placeholder="自动生成试次编号" autocomplete="off" />
+      <button id="startTrialButton" type="button">开始试次</button>
+      <select id="semanticObjectSelect" autocomplete="off" disabled>
+        <option value="">等待 Unity 物体目录…</option>
+      </select>
+      <button id="refreshObjectsButton" type="button">刷新物体</button>
+      <button id="confirmTargetButton" type="button" disabled>确认并高亮</button>
+      <button id="completeTrialButton" type="button">完成试次</button>
+      <span id="objectControlStatus" data-state="disconnected">请先连接 Unity 串流</span>
+    </div>
+
+    <div id="semanticMatcherControls" class="box semantic-matcher">
+      <div class="semantic-match-toolbar">
+        <strong>语义匹配：</strong>
+        <form id="semanticMatchForm" class="semantic-match-form">
+          <label for="semanticQueryInput">目标描述</label>
+          <input id="semanticQueryInput" type="text" placeholder="输入目标描述"
+            autocomplete="off" />
+          <button id="matchSemanticButton" type="submit" disabled>匹配候选</button>
+        </form>
+        <span id="semanticMatchStatus" data-state="pending">等待 Unity 物体目录</span>
+      </div>
+
+      <div id="semanticMatchResults" class="semantic-match-results" hidden>
+        <div class="semantic-match-summary">
+          <span class="semantic-summary-label">识别属性</span>
+          <output id="semanticSlots">-</output>
+          <span class="semantic-summary-label">首选 Stable ID</span>
+          <code id="semanticPreferredId">-</code>
+        </div>
+
+        <div class="semantic-candidate-table-wrap">
+          <table id="semanticCandidateTable" class="semantic-candidate-table">
+            <thead>
+              <tr>
+                <th scope="col">选择</th>
+                <th scope="col">排序</th>
+                <th scope="col">画面</th>
+                <th scope="col">物体</th>
+                <th scope="col">Stable ID</th>
+                <th scope="col">分数</th>
+                <th scope="col">匹配字段</th>
+              </tr>
+            </thead>
+            <tbody id="semanticCandidateBody"></tbody>
+          </table>
+        </div>
+        <p id="semanticEmptyCandidates" class="semantic-empty-candidates" hidden></p>
+
+        <details id="semanticRejectedSection" class="semantic-rejected" hidden>
+          <summary>查看属性冲突物体</summary>
+          <ul id="semanticRejectedList"></ul>
+        </details>
+      </div>
+    </div>
+
+    <div id="sequenceControls" class="box guidance-controls">
+      <strong>连续步骤：</strong>
+      <button id="startSequenceButton" type="button">开始/重新开始</button>
+      <button id="previousStepButton" type="button">上一步</button>
+      <button id="nextStepButton" type="button">下一步</button>
+      <button id="completeSequenceButton" type="button">结束</button>
+      <span id="sequenceStatus" data-state="disconnected">尚未开始</span>
+    </div>
+
+    <div class="box">
+      <span>Codec preferences:</span>
+      <select id="codecPreferences" autocomplete="off" disabled>
+        <option selected value="">Default</option>
+      </select>
+    </div>
+
+    <div class="box">
+      <span>Lock Cursor to Player:</span>
+      <input type="checkbox" id="lockMouseCheck" autocomplete="off" />
+    </div>
+
+    <p>
+      先选择提示方法，再开始连续步骤。Unity 负责显示目标和执行步骤状态，
+      Web 页面负责切换实验条件及推进流程。
+    </p>
+
+    <div id="message"></div>
+  </div>
+
+  <script type="text/javascript" src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="https://unpkg.com/event-target@latest/min.js"></script>
+  <script src="https://unpkg.com/resize-observer-polyfill@1.5.0/dist/ResizeObserver.global.js"></script>
+  <script src="js/sequence-controls.js"></script>
+  <script type="module" src="js/main.js"></script>
+
+</body>
+
+</html>

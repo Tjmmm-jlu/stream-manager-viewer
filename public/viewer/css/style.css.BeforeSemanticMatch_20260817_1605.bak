@@ -1,0 +1,116 @@
+body {
+  margin: 0px;
+}
+
+#player {
+  position: relative;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  background-color: #323232;
+}
+
+#player:before {
+  content: "";
+  display: block;
+  padding-top: 66%;
+}
+
+#playButton {
+  width: 15%;
+  max-width: 200px;
+  cursor: pointer;
+}
+
+#Video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#fullscreenButton {
+  position: absolute;
+  top: 25px;
+  right: 25px;
+  width: 32px;
+  height: 32px;
+}
+
+.guidance-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.guidance-controls select,
+.guidance-controls button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+
+#guidanceStatus {
+  font-size: 14px;
+  color: #b7b7b7;
+}
+
+#guidanceStatus[data-state="ready"] {
+  color: #50c878;
+}
+
+#guidanceStatus[data-state="pending"] {
+  color: #f2c94c;
+}
+
+#guidanceStatus[data-state="error"] {
+  color: #ff6b6b;
+}
+
+.object-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.object-controls input,
+.object-controls select,
+.object-controls button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+
+#trialIdInput {
+  width: 180px;
+}
+
+#semanticObjectSelect {
+  min-width: 260px;
+}
+
+#objectControlStatus {
+  min-width: 280px;
+  font-size: 14px;
+  color: #b7b7b7;
+}
+
+#objectControlStatus[data-state="ready"] {
+  color: #50c878;
+}
+
+#objectControlStatus[data-state="pending"] {
+  color: #f2c94c;
+}
+
+#objectControlStatus[data-state="error"],
+#objectControlStatus[data-state="disconnected"] {
+  color: #ff6b6b;
+}

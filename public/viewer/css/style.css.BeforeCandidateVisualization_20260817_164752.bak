@@ -1,0 +1,294 @@
+body {
+  margin: 0px;
+}
+
+#player {
+  position: relative;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  background-color: #323232;
+}
+
+#player:before {
+  content: "";
+  display: block;
+  padding-top: 66%;
+}
+
+#playButton {
+  width: 15%;
+  max-width: 200px;
+  cursor: pointer;
+}
+
+#Video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#fullscreenButton {
+  position: absolute;
+  top: 25px;
+  right: 25px;
+  width: 32px;
+  height: 32px;
+}
+
+.guidance-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.guidance-controls select,
+.guidance-controls button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+
+#guidanceStatus {
+  font-size: 14px;
+  color: #b7b7b7;
+}
+
+#guidanceStatus[data-state="ready"] {
+  color: #50c878;
+}
+
+#guidanceStatus[data-state="pending"] {
+  color: #f2c94c;
+}
+
+#guidanceStatus[data-state="error"] {
+  color: #ff6b6b;
+}
+
+.object-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.object-controls input,
+.object-controls select,
+.object-controls button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+
+#trialIdInput {
+  width: 180px;
+}
+
+#semanticObjectSelect {
+  min-width: 260px;
+}
+
+#objectControlStatus {
+  min-width: 280px;
+  font-size: 14px;
+  color: #b7b7b7;
+}
+
+#objectControlStatus[data-state="ready"] {
+  color: #50c878;
+}
+
+#objectControlStatus[data-state="pending"] {
+  color: #f2c94c;
+}
+
+#objectControlStatus[data-state="error"],
+#objectControlStatus[data-state="disconnected"] {
+  color: #ff6b6b;
+}
+
+.semantic-matcher {
+  padding: 14px 0;
+  border-top: 1px solid #d6dbe0;
+  border-bottom: 1px solid #d6dbe0;
+}
+
+.semantic-match-toolbar,
+.semantic-match-form,
+.semantic-match-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.semantic-match-form {
+  flex: 1 1 520px;
+}
+
+.semantic-match-form input,
+.semantic-match-form button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+#semanticQueryInput {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+
+#matchSemanticButton {
+  width: auto;
+  margin: 0;
+}
+
+#semanticMatchStatus {
+  min-width: 160px;
+  font-size: 14px;
+  color: #6c737a;
+}
+
+#semanticMatchStatus[data-state="ready"] {
+  color: #19733a;
+}
+
+#semanticMatchStatus[data-state="pending"] {
+  color: #8a6513;
+}
+
+#semanticMatchStatus[data-state="error"] {
+  color: #b42318;
+}
+
+.semantic-match-results {
+  margin-top: 14px;
+}
+
+.semantic-match-summary {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.semantic-summary-label {
+  font-weight: 600;
+  color: #353b41;
+}
+
+#semanticSlots {
+  display: flex;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.semantic-slot {
+  padding: 2px 6px;
+  border: 1px solid #cbd3da;
+  border-radius: 3px;
+  background: #f3f5f7;
+  color: #26323d;
+  font-family: monospace;
+}
+
+#semanticPreferredId {
+  overflow-wrap: anywhere;
+}
+
+.semantic-candidate-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.semantic-candidate-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.semantic-candidate-table th,
+.semantic-candidate-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #dfe3e7;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.semantic-candidate-table th {
+  background: #f4f6f8;
+  color: #3e464d;
+  font-weight: 600;
+}
+
+.semantic-candidate-table tbody tr:hover {
+  background: #f7faf8;
+}
+
+.semantic-candidate-table input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.semantic-rank,
+.semantic-score {
+  font-variant-numeric: tabular-nums;
+}
+
+.semantic-stable-id {
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+
+.semantic-empty-candidates {
+  margin: 8px 0 0;
+  color: #b42318;
+}
+
+.semantic-rejected {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #535b62;
+}
+
+.semantic-rejected summary {
+  cursor: pointer;
+}
+
+.semantic-rejected ul {
+  margin: 8px 0 0;
+  padding-left: 24px;
+}
+
+@media screen and (max-width: 700px) {
+  .semantic-match-toolbar {
+    align-items: stretch;
+  }
+
+  .semantic-match-form {
+    flex-basis: 100%;
+  }
+
+  .semantic-match-form label {
+    width: 100%;
+  }
+
+  #semanticQueryInput {
+    min-width: 0;
+  }
+
+  #semanticMatchStatus {
+    min-width: 0;
+  }
+}

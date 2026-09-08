@@ -1,0 +1,494 @@
+const THUMBNAIL_INTERVAL_MS = 250;
+const THUMBNAIL_PADDING = 0.55;
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function finiteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function normalizeCandidateVisual(input) {
+  if (!input || typeof input !== 'object' ||
+      typeof input.id !== 'string' || !input.id.trim()) {
+    return null;
+  }
+
+  const coordinatesAreValid = [
+    input.xMin,
+    input.yMin,
+    input.xMax,
+    input.yMax
+  ].every(finiteNumber);
+  const xMin = coordinatesAreValid ? clamp(input.xMin, 0, 1) : 0;
+  const yMin = coordinatesAreValid ? clamp(input.yMin, 0, 1) : 0;
+  const xMax = coordinatesAreValid ? clamp(input.xMax, 0, 1) : 0;
+  const yMax = coordinatesAreValid ? clamp(input.yMax, 0, 1) : 0;
+  const visible = input.visible === true &&
+    input.hasBounds === true &&
+    coordinatesAreValid && xMax > xMin && yMax > yMin;
+
+  return {
+    id: input.id.trim(),
+    displayName: typeof input.displayName === 'string'
+      ? input.displayName.trim()
+      : '',
+    hasBounds: input.hasBounds === true,
+    visible,
+    xMin,
+    yMin,
+    xMax,
+    yMax,
+    depth: finiteNumber(input.depth) ? input.depth : null
+  };
+}
+
+function normalizePlacementZoneVisual(input) {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const id = typeof input.id === 'string' && input.id.trim()
+    ? input.id.trim()
+    : typeof input.objectId === 'string' && input.objectId.trim()
+      ? input.objectId.trim()
+      : '';
+  if (!id) {
+    return null;
+  }
+
+  const coordinatesAreValid = [
+    input.xMin,
+    input.yMin,
+    input.xMax,
+    input.yMax
+  ].every(finiteNumber);
+  const xMin = coordinatesAreValid ? clamp(input.xMin, 0, 1) : 0;
+  const yMin = coordinatesAreValid ? clamp(input.yMin, 0, 1) : 0;
+  const xMax = coordinatesAreValid ? clamp(input.xMax, 0, 1) : 0;
+  const yMax = coordinatesAreValid ? clamp(input.yMax, 0, 1) : 0;
+  const visible = input.visible === true &&
+    input.hasBounds === true &&
+    coordinatesAreValid && xMax > xMin && yMax > yMin;
+
+  return {
+    id,
+    objectId: typeof input.objectId === 'string'
+      ? input.objectId.trim()
+      : '',
+    displayName: typeof input.displayName === 'string'
+      ? input.displayName.trim()
+      : '',
+    hasBounds: input.hasBounds === true,
+    visible,
+    xMin,
+    yMin,
+    xMax,
+    yMax,
+    depth: finiteNumber(input.depth) ? input.depth : null
+  };
+}
+
+export function createOverlayRect(visual) {
+  if (!visual || !visual.visible) {
+    return null;
+  }
+  return {
+    left: visual.xMin * 100,
+    top: (1 - visual.yMax) * 100,
+    width: (visual.xMax - visual.xMin) * 100,
+    height: (visual.yMax - visual.yMin) * 100
+  };
+}
+
+export function computeThumbnailCrop(
+  visual,
+  sourceWidth,
+  sourceHeight,
+  targetAspect = 16 / 9,
+  padding = THUMBNAIL_PADDING) {
+  if (!visual || !visual.visible ||
+      !finiteNumber(sourceWidth) || sourceWidth <= 0 ||
+      !finiteNumber(sourceHeight) || sourceHeight <= 0 ||
+      !finiteNumber(targetAspect) || targetAspect <= 0) {
+    return null;
+  }
+
+  const top = 1 - visual.yMax;
+  const bottom = 1 - visual.yMin;
+  const centerX = (visual.xMin + visual.xMax) / 2;
+  const centerY = (top + bottom) / 2;
+  const normalizedTargetAspect =
+    targetAspect * sourceHeight / sourceWidth;
+  let width = Math.max(0.04, visual.xMax - visual.xMin) *
+    (1 + padding * 2);
+  let height = Math.max(0.04, bottom - top) *
+    (1 + padding * 2);
+
+  if (width / height < normalizedTargetAspect) {
+    width = height * normalizedTargetAspect;
+  } else {
+    height = width / normalizedTargetAspect;
+  }
+
+  if (width > 1) {
+    width = 1;
+    height = Math.min(1, width / normalizedTargetAspect);
+  }
+  if (height > 1) {
+    height = 1;
+    width = Math.min(1, height * normalizedTargetAspect);
+  }
+
+  const left = clamp(centerX - width / 2, 0, 1 - width);
+  const cropTop = clamp(centerY - height / 2, 0, 1 - height);
+  return {
+    x: left * sourceWidth,
+    y: cropTop * sourceHeight,
+    width: width * sourceWidth,
+    height: height * sourceHeight
+  };
+}
+
+function assertElements(elements) {
+  ['player', 'thumbnailRoot'].forEach((key) => {
+    if (!elements[key]) {
+      throw new Error(`Candidate visualizer is missing element '${key}'.`);
+    }
+  });
+  if (typeof elements.getVideoElement !== 'function') {
+    throw new Error('Candidate visualizer requires getVideoElement().');
+  }
+}
+
+function sourceDimensions(source) {
+  return {
+    width: source?.videoWidth || source?.naturalWidth || source?.width || 0,
+    height: source?.videoHeight || source?.naturalHeight || source?.height || 0
+  };
+}
+
+export function createCandidateVisualizer(elements, options = {}) {
+  assertElements(elements);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'semanticCandidateOverlay';
+  overlay.setAttribute('aria-label', '语义匹配候选位置');
+  const placementZoneOverlay = document.createElement('div');
+  placementZoneOverlay.id = 'semanticPlacementZoneOverlay';
+  placementZoneOverlay.setAttribute('aria-label', '候选物体对应放置区域');
+
+  let candidates = [];
+  let visualById = new Map();
+  let selectedId = '';
+  let lastThumbnailTime = 0;
+
+  function ensureOverlay() {
+    if (!elements.player.contains(overlay)) {
+      elements.player.appendChild(overlay);
+    }
+  }
+
+  function ensurePlacementZoneOverlay() {
+    if (!elements.player.contains(placementZoneOverlay)) {
+      if (elements.player.contains(overlay)) {
+        elements.player.insertBefore(placementZoneOverlay, overlay);
+      } else {
+        elements.player.appendChild(placementZoneOverlay);
+      }
+    }
+  }
+
+  function findThumbnailCanvas(candidateId) {
+    return Array.from(elements.thumbnailRoot.querySelectorAll(
+      'canvas[data-candidate-id]'))
+      .find(canvas => canvas.dataset.candidateId === candidateId) || null;
+  }
+
+  function setThumbnailStatus(canvas, message) {
+    const status = canvas?.parentElement?.querySelector(
+      '[data-thumbnail-status]');
+    if (!status) {
+      return;
+    }
+    status.textContent = message;
+    status.hidden = !message;
+  }
+
+  function clearThumbnail(canvas, message) {
+    const context = canvas?.getContext('2d');
+    if (context) {
+      context.fillStyle = '#20262b';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    setThumbnailStatus(canvas, message);
+  }
+
+  function setEmphasizedCandidate(candidateId, emphasized) {
+    const box = Array.from(overlay.querySelectorAll(
+      '.candidate-overlay-box'))
+      .find(item => item.dataset.candidateId === candidateId);
+    if (box) {
+      box.dataset.emphasized = emphasized ? 'true' : 'false';
+    }
+  }
+
+  function bindThumbnailInteractions(candidateId) {
+    const canvas = findThumbnailCanvas(candidateId);
+    const row = canvas?.closest('tr');
+    const frame = canvas?.parentElement;
+    if (!row || !frame) {
+      return;
+    }
+    row.addEventListener('pointerenter', () => {
+      setEmphasizedCandidate(candidateId, true);
+    });
+    row.addEventListener('pointerleave', () => {
+      setEmphasizedCandidate(candidateId, false);
+    });
+    frame.addEventListener('click', () => {
+      if (typeof options.onCandidateSelected === 'function') {
+        options.onCandidateSelected(candidateId);
+      }
+    });
+    frame.addEventListener('keydown', (event) => {
+      if ((event.key === 'Enter' || event.key === ' ') &&
+          typeof options.onCandidateSelected === 'function') {
+        event.preventDefault();
+        options.onCandidateSelected(candidateId);
+      }
+    });
+  }
+
+  function createOverlayBox(candidate, index) {
+    const box = document.createElement('button');
+    box.type = 'button';
+    box.className = 'candidate-overlay-box';
+    box.dataset.candidateId = candidate.id;
+    box.dataset.selected = candidate.id === selectedId ? 'true' : 'false';
+    box.dataset.emphasized = 'false';
+    box.hidden = true;
+    box.setAttribute(
+      'aria-label',
+      `候选 ${index + 1}：${candidate.displayName || candidate.id}`);
+
+    const indexLabel = document.createElement('span');
+    indexLabel.className = 'candidate-overlay-index';
+    indexLabel.textContent = String(index + 1);
+    box.appendChild(indexLabel);
+    box.addEventListener('click', () => {
+      if (typeof options.onCandidateSelected === 'function') {
+        options.onCandidateSelected(candidate.id);
+      }
+    });
+    overlay.appendChild(box);
+  }
+
+  function drawThumbnail(candidateId, visual) {
+    const canvas = findThumbnailCanvas(candidateId);
+    if (!canvas) {
+      return;
+    }
+    if (!visual?.visible) {
+      clearThumbnail(canvas, '不在画面中');
+      return;
+    }
+
+    const source = elements.getVideoElement();
+    const dimensions = sourceDimensions(source);
+    const crop = computeThumbnailCrop(
+      visual,
+      dimensions.width,
+      dimensions.height,
+      canvas.width / canvas.height);
+    const context = canvas.getContext('2d');
+    if (!source || !crop || !context) {
+      clearThumbnail(canvas, '等待视频画面');
+      return;
+    }
+
+    try {
+      context.drawImage(
+        source,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height);
+      setThumbnailStatus(canvas, '');
+    } catch (error) {
+      console.warn('Could not capture candidate thumbnail.', error);
+      clearThumbnail(canvas, '缩略图不可用');
+    }
+  }
+
+  function updateOverlayBox(candidateId, visual) {
+    const box = Array.from(overlay.querySelectorAll(
+      '.candidate-overlay-box'))
+      .find(item => item.dataset.candidateId === candidateId);
+    const rect = createOverlayRect(visual);
+    if (!box || !rect) {
+      if (box) {
+        box.hidden = true;
+      }
+      return;
+    }
+
+    box.hidden = false;
+    box.style.left = `${rect.left}%`;
+    box.style.top = `${rect.top}%`;
+    box.style.width = `${rect.width}%`;
+    box.style.height = `${rect.height}%`;
+  }
+
+  function createPlacementZoneBox(zone, index) {
+    const box = document.createElement('div');
+    box.className = 'placement-zone-box';
+    box.dataset.zoneId = zone.id;
+    box.hidden = true;
+    box.setAttribute(
+      'aria-label',
+      `候选 ${index + 1} 对应放置区域：${zone.displayName || zone.objectId || zone.id}`);
+    placementZoneOverlay.appendChild(box);
+  }
+
+  function updatePlacementZoneBox(zoneId, visual) {
+    const box = Array.from(placementZoneOverlay.querySelectorAll(
+      '.placement-zone-box'))
+      .find(item => item.dataset.zoneId === zoneId);
+    const rect = createOverlayRect(visual);
+    if (!box || !rect) {
+      if (box) {
+        box.hidden = true;
+      }
+      return;
+    }
+
+    box.hidden = false;
+    box.style.left = `${rect.left}%`;
+    box.style.top = `${rect.top}%`;
+    box.style.width = `${rect.width}%`;
+    box.style.height = `${rect.height}%`;
+  }
+
+  function sendPreviewCommand() {
+    if (typeof options.sendCommand !== 'function') {
+      return;
+    }
+    const candidateIds = candidates.map(candidate => candidate.id);
+    options.sendCommand(candidateIds.length > 0
+      ? { type: 'preview_candidates', candidateIds }
+      : { type: 'clear_candidate_preview' });
+  }
+
+  function setSelectedCandidate(candidateId) {
+    selectedId = typeof candidateId === 'string' ? candidateId : '';
+    overlay.querySelectorAll('.candidate-overlay-box')
+      .forEach((box) => {
+        box.dataset.selected =
+          box.dataset.candidateId === selectedId ? 'true' : 'false';
+      });
+    elements.thumbnailRoot.querySelectorAll('tr[data-candidate-id]')
+      .forEach((row) => {
+        row.dataset.selected =
+          row.dataset.candidateId === selectedId ? 'true' : 'false';
+      });
+  }
+
+  return {
+    setCandidates(nextCandidates) {
+      const seenIds = new Set();
+      candidates = (Array.isArray(nextCandidates) ? nextCandidates : [])
+        .filter(candidate => candidate && typeof candidate.id === 'string')
+        .filter((candidate) => {
+          if (seenIds.has(candidate.id)) {
+            return false;
+          }
+          seenIds.add(candidate.id);
+          return true;
+        });
+      visualById = new Map();
+      lastThumbnailTime = 0;
+      overlay.replaceChildren();
+      placementZoneOverlay.replaceChildren();
+      ensureOverlay();
+
+      candidates.forEach((candidate, index) => {
+        createOverlayBox(candidate, index);
+        bindThumbnailInteractions(candidate.id);
+        clearThumbnail(findThumbnailCanvas(candidate.id), '等待候选位置');
+      });
+      setSelectedCandidate(
+        candidates.some(candidate => candidate.id === selectedId)
+          ? selectedId
+          : candidates[0]?.id || '');
+      sendPreviewCommand();
+    },
+
+    updatePlacementZones(rawVisuals) {
+      const seenIds = new Set();
+      const placementVisuals = (Array.isArray(rawVisuals)
+        ? rawVisuals
+        : [])
+        .map(normalizePlacementZoneVisual)
+        .filter(Boolean)
+        .filter((visual) => {
+          if (seenIds.has(visual.id)) {
+            return false;
+          }
+          seenIds.add(visual.id);
+          return true;
+        });
+
+      ensurePlacementZoneOverlay();
+      placementZoneOverlay.replaceChildren();
+      placementVisuals.forEach((visual, index) => {
+        createPlacementZoneBox(visual, index);
+        updatePlacementZoneBox(visual.id, visual);
+      });
+    },
+
+    updateVisuals(rawVisuals, now = Date.now()) {
+      visualById = new Map(
+        (Array.isArray(rawVisuals) ? rawVisuals : [])
+          .map(normalizeCandidateVisual)
+          .filter(Boolean)
+          .map(visual => [visual.id, visual]));
+      ensureOverlay();
+      if (typeof options.onVisualsUpdated === 'function') {
+        options.onVisualsUpdated(Array.from(visualById.values()));
+      }
+      candidates.forEach((candidate) => {
+        updateOverlayBox(candidate.id, visualById.get(candidate.id));
+      });
+
+      if (now - lastThumbnailTime < THUMBNAIL_INTERVAL_MS) {
+        return;
+      }
+      lastThumbnailTime = now;
+      candidates.forEach((candidate) => {
+        drawThumbnail(candidate.id, visualById.get(candidate.id));
+      });
+    },
+
+    setSelectedCandidate,
+
+    clear({ notifyUnity = true } = {}) {
+      candidates.forEach((candidate) => {
+        clearThumbnail(findThumbnailCanvas(candidate.id), '');
+      });
+      candidates = [];
+      visualById = new Map();
+      selectedId = '';
+      overlay.remove();
+      placementZoneOverlay.remove();
+      if (notifyUnity && typeof options.sendCommand === 'function') {
+        options.sendCommand({ type: 'clear_candidate_preview' });
+      }
+    }
+  };
+}

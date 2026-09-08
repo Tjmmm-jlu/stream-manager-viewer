@@ -1,0 +1,121 @@
+<!DOCTYPE HTML>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="../images/favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="css/style.css">
+  <title>PICO 协作目标指定</title>
+</head>
+
+<body>
+  <div id="container">
+    <header class="app-header">
+      <div class="app-identity">
+        <h1>PICO 协作目标指定</h1>
+        <span id="guidanceStatus" class="connection-status"
+          data-state="disconnected">请先连接 Unity 串流</span>
+      </div>
+
+      <div class="trial-toolbar" aria-label="试次控制">
+        <span id="objectControlStatus" data-state="disconnected">等待场景物体目录</span>
+        <button id="startTrialButton" class="button-secondary" type="button">新试次</button>
+        <button id="completeTrialButton" class="button-quiet" type="button">结束试次</button>
+      </div>
+    </header>
+
+    <div id="warning" hidden></div>
+
+    <main id="workspace">
+      <section class="video-workspace" aria-label="Unity 实时画面">
+        <div id="player"></div>
+        <div class="video-legend" aria-hidden="true">
+          <span><i class="legend-marker candidate-marker"></i>候选</span>
+          <span><i class="legend-marker selected-marker"></i>已选择</span>
+        </div>
+      </section>
+
+      <section id="semanticMatcherControls" class="target-panel"
+        aria-labelledby="targetPanelTitle">
+        <header class="target-panel-header">
+          <div>
+            <h2 id="targetPanelTitle">指定目标</h2>
+            <span id="semanticMatchStatus" data-state="pending">等待 Unity 物体目录</span>
+          </div>
+        </header>
+
+        <form id="semanticMatchForm" class="semantic-match-form">
+          <label for="semanticQueryInput">目标描述</label>
+          <div class="semantic-query-row">
+            <input id="semanticQueryInput" type="text"
+              placeholder="输入或接收语音识别文本" autocomplete="off">
+            <button id="matchSemanticButton" class="button-secondary"
+              type="submit" disabled>查找候选</button>
+          </div>
+        </form>
+
+        <div id="semanticMatchResults" class="semantic-match-results" hidden>
+          <div class="candidate-heading">
+            <h3>候选物体</h3>
+          </div>
+
+          <div class="semantic-candidate-table-wrap">
+            <table id="semanticCandidateTable" class="semantic-candidate-table">
+              <thead class="visually-hidden">
+                <tr>
+                  <th scope="col">选择</th>
+                  <th scope="col">编号</th>
+                  <th scope="col">画面</th>
+                  <th scope="col">物体</th>
+                </tr>
+              </thead>
+              <tbody id="semanticCandidateBody"></tbody>
+            </table>
+          </div>
+          <p id="semanticEmptyCandidates" class="semantic-empty-candidates" hidden></p>
+
+          <div class="semantic-internals" hidden aria-hidden="true">
+            <output id="semanticSlots">-</output>
+            <code id="semanticPreferredId">-</code>
+            <details id="semanticRejectedSection" hidden>
+              <summary>属性冲突物体</summary>
+              <ul id="semanticRejectedList"></ul>
+            </details>
+          </div>
+        </div>
+
+        <footer class="target-actions">
+          <button id="clearGuidanceButton" class="button-quiet"
+            type="button">重新指定</button>
+          <button id="confirmTargetButton" class="button-primary"
+            type="button" disabled>确认并高亮</button>
+        </footer>
+      </section>
+    </main>
+
+    <div class="technical-controls" hidden aria-hidden="true">
+      <select id="guidanceMode" autocomplete="off">
+        <option value="highlight" selected>物体高亮</option>
+      </select>
+      <input id="trialIdInput" type="text" autocomplete="off">
+      <select id="semanticObjectSelect" autocomplete="off" disabled>
+        <option value="">等待候选选择</option>
+      </select>
+      <button id="refreshObjectsButton" type="button">刷新物体</button>
+      <select id="codecPreferences" autocomplete="off" disabled>
+        <option selected value="">Default</option>
+      </select>
+      <input type="checkbox" id="lockMouseCheck" autocomplete="off">
+      <div id="message"></div>
+    </div>
+  </div>
+
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="https://unpkg.com/event-target@latest/min.js"></script>
+  <script src="https://unpkg.com/resize-observer-polyfill@1.5.0/dist/ResizeObserver.global.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+
+</html>
