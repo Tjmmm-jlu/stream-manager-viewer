@@ -22,9 +22,7 @@
       </div>
 
       <div class="trial-toolbar" aria-label="试次控制">
-        <span id="objectControlStatus" data-state="disconnected">等待场景物体目录</span>
-        <button id="refreshObjectsButton" class="button-quiet" type="button"
-          title="重新读取当前场景物体目录">刷新目录</button>
+        <span id="objectControlStatus" data-state="disconnected"></span>
         <span id="sequenceStatus" class="sequence-status" data-state="pending"
           aria-live="polite">连续任务未开始</span>
         <button id="startSequenceButton" class="button-primary" type="button">
@@ -35,7 +33,7 @@
         <button id="retryLiquidButton" class="button-quiet" type="button" hidden disabled>重做当前液体步骤</button>
         <button id="recenterExperimentButton" class="button-quiet" type="button"
           title="恢复实验初始站位与朝向" disabled>回到初始站位</button>
-        <span id="recenterStatus" data-state="disconnected" aria-live="polite">定位未连接</span>
+        <span id="recenterStatus" data-state="disconnected" aria-live="polite"></span>
         <button id="startTrialButton" class="button-secondary" type="button">新试次</button>
         <button id="completeTrialButton" class="button-quiet" type="button">结束试次</button>
       </div>
@@ -53,11 +51,29 @@
       </section>
 
       <section id="semanticMatcherControls" class="target-panel"
-        aria-labelledby="targetPanelTitle">
+        aria-label="指定目标">
+        <section id="sequenceStepCard" class="sequence-step-card" hidden
+          aria-label="当前步骤">
+          <img id="sequenceStepImage" alt="当前步骤目标物体参考照" hidden />
+          <div class="sequence-step-body">
+            <span id="sequenceStepProgress" class="sequence-step-progress"></span>
+            <p id="sequenceStepInstruction" class="sequence-step-instruction"></p>
+            <span id="sequenceStepCaption" class="sequence-step-caption" hidden></span>
+          </div>
+        </section>
         <header class="target-panel-header">
-          <div>
-            <h2 id="targetPanelTitle">指定目标</h2>
-            <span id="semanticMatchStatus" data-state="pending">等待 Unity 物体目录</span>
+          <div class="guidance-method-control">
+            <span class="layout-density-label">提示方式</span>
+            <div id="guidanceMethodControl" class="segmented-control"
+              role="group" aria-label="提示方式">
+              <button type="button" data-guidance-method="mouse"
+                aria-pressed="false">鼠标点击</button>
+              <button type="button" data-guidance-method="voice"
+                aria-pressed="false">仅增强语音</button>
+              <button type="button" data-guidance-method="voice_gaze"
+                aria-pressed="false">增强语音+眼动</button>
+            </div>
+            <span id="guidanceMethodStatus" data-state="info" aria-live="polite"></span>
           </div>
           <div class="layout-density-control">
             <span class="layout-density-label">场景密度</span>
@@ -65,14 +81,19 @@
               role="group" aria-label="场景密度">
               <button type="button" data-layout-density="low"
                 aria-pressed="false">Low</button>
-              <button type="button" data-layout-density="medium"
+              <button type="button" data-layout-density="medium" hidden
                 aria-pressed="false">Medium</button>
               <button type="button" data-layout-density="high"
                 aria-pressed="false">High</button>
-              <button type="button" data-layout-density="clear"
+              <button type="button" data-layout-density="clear" hidden
                 aria-pressed="false">Clear</button>
             </div>
-            <span id="layoutDensityStatus" data-state="pending">未设置</span>
+            <span id="layoutDensityStatus" data-state="pending"></span>
+          </div>
+          <div class="layout-variant-control">
+            <span id="layoutVariantStatus" data-state="pending"></span>
+            <button id="randomLayoutButton" class="button-secondary" type="button"
+              title="从布局库随机装载一套新布局（建议在每场实验开始时执行一次）">随机生成布局</button>
           </div>
         </header>
 

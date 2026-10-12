@@ -1,5 +1,11 @@
 const THUMBNAIL_INTERVAL_MS = 250;
 const THUMBNAIL_PADDING = 0.55;
+const THUMBNAIL_CACHE_INTERVAL_MS = 1000;
+
+// 每个候选最近一次成功截图的离屏副本：物体离开视野后仍可回放，
+// 避免“画面外”时缩略图区域只剩空白占位。
+const thumbnailCache = new Map();
+const lastThumbnailCacheTime = new Map();
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -183,6 +189,8 @@ export function createCandidateVisualizer(elements, options = {}) {
   let visualById = new Map();
   let selectedId = '';
   let lastThumbnailTime = 0;
+  // Unity 端预渲染的物体参考照（data URL → Image），仅在无实时画面可裁时兜底显示。
+  let referencePhotos = new Map();
 
   function ensureOverlay() {
     if (!elements.player.contains(overlay)) {
@@ -206,7 +214,7 @@ export function createCandidateVisualizer(elements, options = {}) {
       .find(canvas => canvas.dataset.candidateId === candidateId) || null;
   }
 
-  function setThumbnailStatus(canvas, message) {
+  function setThumbnailStatus(canvas, message, { badge = false } = {}) {
     const status = canvas?.parentElement?.querySelector(
       '[data-thumbnail-status]');
     if (!status) {
@@ -214,6 +222,11 @@ export function createCandidateVisualizer(elements, options = {}) {
     }
     status.textContent = message;
     status.hidden = !message;
+    if (badge && message) {
+      status.dataset.mode = 'badge';
+    } else {
+      delete status.dataset.mode;
+    }
   }
 
   function clearThumbnail(canvas, message) {
@@ -223,6 +236,91 @@ export function createCandidateVisualizer(elements, options = {}) {
       context.fillRect(0, 0, canvas.width, canvas.height);
     }
     setThumbnailStatus(canvas, message);
+  }
+
+  function cacheThumbnail(candidateId, canvas, now = Date.now()) {
+    const last = lastThumbnailCacheTime.get(candidateId) || 0;
+    if (now - last < THUMBNAIL_CACHE_INTERVAL_MS) {
+      return;
+    }
+    lastThumbnailCacheTime.set(candidateId, now);
+    let cached = thumbnailCache.get(candidateId);
+    if (!cached) {
+      cached = document.createElement('canvas');
+      cached.width = canvas.width;
+      cached.height = canvas.height;
+      thumbnailCache.set(candidateId, cached);
+    }
+    const context = cached.getContext('2d');
+    if (context) {
+      context.drawImage(canvas, 0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function restoreCachedThumbnail(canvas) {
+    const cached = thumbnailCache.get(canvas?.dataset.candidateId);
+    const context = canvas?.getContext('2d');
+    if (!cached || !context) {
+      return false;
+    }
+    context.drawImage(cached, 0, 0, canvas.width, canvas.height);
+    return true;
+  }
+
+  function showOffscreenThumbnail(canvas) {
+    if (restoreCachedThumbnail(canvas)) {
+      setThumbnailStatus(canvas, '画面外', { badge: true });
+      return;
+    }
+    if (drawReferencePhoto(canvas)) {
+      return;
+    }
+    const label = canvas?.dataset.offscreenLabel || '';
+    clearThumbnail(canvas, label ? `画面外 · ${label}` : '画面外');
+  }
+
+  function drawReferencePhoto(canvas) {
+    const reference = referencePhotos.get(canvas?.dataset.candidateId);
+    const context = canvas?.getContext('2d');
+    if (!reference?.ready || !context) {
+      return false;
+    }
+    context.drawImage(reference.img, 0, 0, canvas.width, canvas.height);
+    setThumbnailStatus(canvas, '参考照', { badge: true });
+    return true;
+  }
+
+  function setReferencePhoto(candidateId, dataUrl) {
+    if (typeof candidateId !== 'string' || !candidateId) {
+      return;
+    }
+    if (!dataUrl) {
+      referencePhotos.delete(candidateId);
+      return;
+    }
+    const image = new Image();
+    image.onload = () => {
+      referencePhotos.set(candidateId, { img: image, ready: true });
+      refreshThumbnail(candidateId);
+    };
+    image.onerror = () => {
+      console.warn('Failed to load reference photo.', candidateId);
+    };
+    image.src = dataUrl;
+  }
+
+  function refreshThumbnail(candidateId) {
+    const canvas = findThumbnailCanvas(candidateId);
+    if (!canvas) {
+      return;
+    }
+    if (visualById.get(candidateId)?.visible) {
+      return; // 物体当前可见，实时画面会在下一轮刷新中更新
+    }
+    if (thumbnailCache.get(candidateId)) {
+      return; // 已有实时缓存图（含“画面外”回放）
+    }
+    drawReferencePhoto(canvas);
   }
 
   function setEmphasizedCandidate(candidateId, emphasized) {
@@ -285,13 +383,17 @@ export function createCandidateVisualizer(elements, options = {}) {
     overlay.appendChild(box);
   }
 
-  function drawThumbnail(candidateId, visual) {
+  function drawThumbnail(candidateId, visual, now = Date.now()) {
     const canvas = findThumbnailCanvas(candidateId);
     if (!canvas) {
       return;
     }
-    if (!visual?.visible) {
-      clearThumbnail(canvas, '不在画面中');
+    if (!visual) {
+      clearThumbnail(canvas, '等待候选位置');
+      return;
+    }
+    if (!visual.visible) {
+      showOffscreenThumbnail(canvas);
       return;
     }
 
@@ -320,6 +422,7 @@ export function createCandidateVisualizer(elements, options = {}) {
         canvas.width,
         canvas.height);
       setThumbnailStatus(canvas, '');
+      cacheThumbnail(candidateId, canvas, now);
     } catch (error) {
       console.warn('Could not capture candidate thumbnail.', error);
       clearThumbnail(canvas, '缩略图不可用');
@@ -420,7 +523,14 @@ export function createCandidateVisualizer(elements, options = {}) {
       candidates.forEach((candidate, index) => {
         createOverlayBox(candidate, index);
         bindThumbnailInteractions(candidate.id);
-        clearThumbnail(findThumbnailCanvas(candidate.id), '等待候选位置');
+        const canvas = findThumbnailCanvas(candidate.id);
+        const restored = canvas && restoreCachedThumbnail(canvas);
+        if (restored) {
+          // 画面可见性将在下一次视觉更新（≤250ms）后刷新，先清空状态。
+          setThumbnailStatus(canvas, '');
+        } else {
+          clearThumbnail(canvas, '等待候选位置');
+        }
       });
       setSelectedCandidate(
         candidates.some(candidate => candidate.id === selectedId)
@@ -471,11 +581,13 @@ export function createCandidateVisualizer(elements, options = {}) {
       }
       lastThumbnailTime = now;
       candidates.forEach((candidate) => {
-        drawThumbnail(candidate.id, visualById.get(candidate.id));
+        drawThumbnail(candidate.id, visualById.get(candidate.id), now);
       });
     },
 
     setSelectedCandidate,
+
+    setReferencePhoto,
 
     clear({ notifyUnity = true } = {}) {
       candidates.forEach((candidate) => {

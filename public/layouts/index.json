@@ -1,0 +1,286 @@
+{
+    "profile": "runtime-joint-v1",
+    "generatedUtc": "2026-10-09T02:31:23.9498584Z",
+    "layouts": [
+        {
+            "file": "layout_000.json",
+            "index": 0,
+            "seed": 20260915,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_001.json",
+            "index": 1,
+            "seed": 20268834,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_002.json",
+            "index": 2,
+            "seed": 20276753,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_003.json",
+            "index": 3,
+            "seed": 20284672,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_004.json",
+            "index": 4,
+            "seed": 20292591,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_005.json",
+            "index": 5,
+            "seed": 20300510,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_006.json",
+            "index": 6,
+            "seed": 20308429,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_007.json",
+            "index": 7,
+            "seed": 20316348,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_008.json",
+            "index": 8,
+            "seed": 20324267,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_009.json",
+            "index": 9,
+            "seed": 20332186,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_010.json",
+            "index": 10,
+            "seed": 20340105,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_011.json",
+            "index": 11,
+            "seed": 20348024,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_012.json",
+            "index": 12,
+            "seed": 20355943,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_013.json",
+            "index": 13,
+            "seed": 20363862,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_014.json",
+            "index": 14,
+            "seed": 20371781,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_015.json",
+            "index": 15,
+            "seed": 20379700,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_016.json",
+            "index": 16,
+            "seed": 20387619,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_017.json",
+            "index": 17,
+            "seed": 20395538,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_018.json",
+            "index": 18,
+            "seed": 20403457,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_019.json",
+            "index": 19,
+            "seed": 20411376,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_020.json",
+            "index": 20,
+            "seed": 20419295,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_021.json",
+            "index": 21,
+            "seed": 20427214,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_022.json",
+            "index": 22,
+            "seed": 20435133,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_023.json",
+            "index": 23,
+            "seed": 20443052,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_024.json",
+            "index": 24,
+            "seed": 20450971,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_025.json",
+            "index": 25,
+            "seed": 20458890,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_026.json",
+            "index": 26,
+            "seed": 20466809,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_027.json",
+            "index": 27,
+            "seed": 20474728,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_028.json",
+            "index": 28,
+            "seed": 20482647,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_029.json",
+            "index": 29,
+            "seed": 20490566,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_030.json",
+            "index": 30,
+            "seed": 20498485,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_031.json",
+            "index": 31,
+            "seed": 20506404,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_032.json",
+            "index": 32,
+            "seed": 20514323,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_033.json",
+            "index": 33,
+            "seed": 20522242,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_034.json",
+            "index": 34,
+            "seed": 20530161,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_035.json",
+            "index": 35,
+            "seed": 20538080,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_036.json",
+            "index": 36,
+            "seed": 20545999,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_037.json",
+            "index": 37,
+            "seed": 20553918,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_038.json",
+            "index": 38,
+            "seed": 20561837,
+            "items": 78,
+            "shared": 39
+        },
+        {
+            "file": "layout_039.json",
+            "index": 39,
+            "seed": 20569756,
+            "items": 78,
+            "shared": 39
+        }
+    ]
+}

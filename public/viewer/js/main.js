@@ -27,6 +27,13 @@ let guidanceDataChannel = null;
 let semanticObjectCatalog = [];
 let semanticMatchController;
 let candidateVisualizer;
+const objectPhotos = new Map();
+let currentStepTargetId = '';
+let layoutLocked = false;
+let layoutSeed = 20260811;
+let pendingRuntimeVariantIndex = null;
+let guidanceMethod = 'voice_gaze';
+const RUNTIME_LAYOUT_USED_KEY = 'runtimeLayoutUsed';
 
 const codecPreferences = document.getElementById('codecPreferences');
 const guidanceModeSelect = document.getElementById('guidanceMode');
@@ -35,7 +42,13 @@ const guidanceStatus = document.getElementById('guidanceStatus');
 const gazeStatus = document.getElementById('gazeStatus');
 const layoutDensityButtons = Array.from(
   document.querySelectorAll('[data-layout-density]'));
+const guidanceMethodButtons = Array.from(
+  document.querySelectorAll('[data-guidance-method]'));
+const guidanceMethodStatus = document.getElementById('guidanceMethodStatus');
+const semanticMatcherPanel = document.getElementById('semanticMatcherControls');
 const layoutDensityStatus = document.getElementById('layoutDensityStatus');
+const randomLayoutButton = document.getElementById('randomLayoutButton');
+const layoutVariantStatus = document.getElementById('layoutVariantStatus');
 const trialIdInput = document.getElementById('trialIdInput');
 const startSequenceButton = document.getElementById('startSequenceButton');
 const resetSequenceButton = document.getElementById('resetSequenceButton');
@@ -43,10 +56,14 @@ const recenterExperimentButton = document.getElementById('recenterExperimentButt
 const recenterStatus = document.getElementById('recenterStatus');
 const sequenceStatus = document.getElementById('sequenceStatus');
 const liquidStatus = document.getElementById('liquidStatus');
+const sequenceStepCard = document.getElementById('sequenceStepCard');
+const sequenceStepImage = document.getElementById('sequenceStepImage');
+const sequenceStepProgress = document.getElementById('sequenceStepProgress');
+const sequenceStepInstruction = document.getElementById('sequenceStepInstruction');
+const sequenceStepCaption = document.getElementById('sequenceStepCaption');
 const retryLiquidButton = document.getElementById('retryLiquidButton');
 const startTrialButton = document.getElementById('startTrialButton');
 const semanticObjectSelect = document.getElementById('semanticObjectSelect');
-const refreshObjectsButton = document.getElementById('refreshObjectsButton');
 const confirmTargetButton = document.getElementById('confirmTargetButton');
 const completeTrialButton = document.getElementById('completeTrialButton');
 const objectControlStatus = document.getElementById('objectControlStatus');
@@ -59,14 +76,29 @@ const playerDiv = document.getElementById('player');
 const lockMouseCheck = document.getElementById('lockMouseCheck');
 const videoPlayer = new VideoPlayer();
 
+const GUIDANCE_METHOD_CONDITIONS = Object.freeze({
+  mouse: 'mouse_click',
+  voice: 'voice_semantic',
+  voice_gaze: 'voice_semantic_gaze'
+});
+
+const GUIDANCE_METHOD_HINTS = Object.freeze({
+  mouse: '鼠标点击：请在左侧画面上直接点击目标',
+  voice: '仅增强语音：输入描述后从候选中确认（眼动不参与）',
+  voice_gaze: '增强语音+眼动：候选会结合指导者注视排序'
+});
+
 setup();
 connectGazeWebSocket();
 setupGuidanceControls();
 setupObjectControls();
 setupSequenceControls();
 setupLayoutDensityControls();
+setupLayoutVariantControls();
 setupCandidateVisualization();
 setupSemanticMatcher();
+setupGuidanceMethodControls();
+setupVideoClickGuard();
 
 window.document.oncontextmenu = function () {
   return false;     // cancel default menu
@@ -300,6 +332,66 @@ function setupGuidanceControls() {
   });
 }
 
+function setupGuidanceMethodControls() {
+  guidanceMethodButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      applyGuidanceMethod(button.dataset.guidanceMethod);
+    });
+  });
+  applyGuidanceMethod(guidanceMethod, { reset: false });
+}
+
+function applyGuidanceMethod(method, { reset = true } = {}) {
+  if (!GUIDANCE_METHOD_CONDITIONS[method]) {
+    return;
+  }
+  guidanceMethod = method;
+
+  guidanceMethodButtons.forEach(button => {
+    const selected = button.dataset.guidanceMethod === method;
+    button.dataset.selected = selected ? 'true' : 'false';
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+
+  if (semanticMatcherPanel) {
+    semanticMatcherPanel.dataset.guidanceMethod = method;
+  }
+  semanticMatchController?.setGazeRankingEnabled(method === 'voice_gaze');
+
+  setGuidanceMethodStatus(GUIDANCE_METHOD_HINTS[method] || '', 'info');
+
+  if (reset) {
+    resetTargetWorkspace();
+  }
+}
+
+function setupVideoClickGuard() {
+  // 非鼠标模式下拦截视频区点击，避免误触发 RenderStreaming 远程输入与指针锁定。
+  playerDiv.addEventListener('click', (event) => {
+    if (guidanceMethod === 'mouse') {
+      return;
+    }
+    const video = videoPlayer.videoElement;
+    if (video && (event.target === video || video.contains(event.target))) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  }, true);
+}
+
+function setGuidanceMethodStatus(message, state) {
+  if (!guidanceMethodStatus) {
+    return;
+  }
+  guidanceMethodStatus.textContent = message;
+  guidanceMethodStatus.title = message;
+  guidanceMethodStatus.dataset.state = state;
+}
+
+function guidanceMethodCondition() {
+  return GUIDANCE_METHOD_CONDITIONS[guidanceMethod] || 'database_id_highlight';
+}
+
 function setupObjectControls() {
   startTrialButton.addEventListener('click', () => {
     resetTargetWorkspace();
@@ -310,12 +402,10 @@ function setupObjectControls() {
     sendGuidanceCommand({
       type: 'start_trial',
       trialId: trialIdInput.value.trim(),
-      condition: 'database_id_highlight',
+      condition: guidanceMethodCondition(),
       mode: 'highlight'
     });
   });
-
-  refreshObjectsButton.addEventListener('click', requestObjectCatalog);
 
   semanticObjectSelect.addEventListener('change', () => {
     confirmTargetButton.disabled = !semanticObjectSelect.value;
@@ -366,7 +456,7 @@ function setupSequenceControls() {
     const sent = sendGuidanceCommand({
       type: 'start_sequence',
       trialId: trialIdInput.value.trim(),
-      condition: 'database_id_highlight',
+      condition: guidanceMethodCondition(),
       mode: 'highlight'
     });
     if (!sent) {
@@ -402,7 +492,7 @@ function setupLayoutDensityControls() {
       const sent = sendGuidanceCommand({
         type: 'set_layout_density',
         density,
-        seed: 20260811
+        seed: layoutSeed
       });
       if (!sent) {
         setLayoutDensityStatus('请先连接 Unity 串流', 'disconnected');
@@ -433,7 +523,6 @@ function setupSemanticMatcher() {
     form: document.getElementById('semanticMatchForm'),
     input: document.getElementById('semanticQueryInput'),
     submitButton: document.getElementById('matchSemanticButton'),
-    status: document.getElementById('semanticMatchStatus'),
     results: document.getElementById('semanticMatchResults'),
     slots: document.getElementById('semanticSlots'),
     preferredId: document.getElementById('semanticPreferredId'),
@@ -447,6 +536,7 @@ function setupSemanticMatcher() {
     onMatchResult: (result) => {
       clearSelectedTarget();
       candidateVisualizer.setCandidates(result.candidates);
+      requestObjectPhotos(result.candidates);
     },
     onGazeRanking: (result, orderChanged) => {
       if (orderChanged) {
@@ -490,6 +580,94 @@ function selectSemanticObject(targetId) {
 function requestObjectCatalog() {
   setObjectControlStatus('正在读取 Unity 物体目录…', 'pending');
   sendGuidanceCommand({ type: 'get_object_catalog' });
+}
+
+function requestObjectPhotos(candidateList) {
+  const missingIds = (Array.isArray(candidateList) ? candidateList : [])
+    .map(candidate => candidate && candidate.id)
+    .filter(id => typeof id === 'string' && id && !objectPhotos.has(id));
+  if (missingIds.length === 0) {
+    return;
+  }
+  // 先以 null 占位，避免候选列表反复刷新时重复请求。
+  missingIds.forEach(id => objectPhotos.set(id, null));
+  sendGuidanceCommand({
+    type: 'request_object_photos',
+    candidateIds: missingIds
+  });
+}
+
+function handleObjectPhoto(response) {
+  const id = typeof response.id === 'string' ? response.id : '';
+  if (!id) {
+    return;
+  }
+  const photo = typeof response.photo === 'string' && response.photo
+    ? response.photo
+    : null;
+  objectPhotos.set(id, photo);
+  if (candidateVisualizer) {
+    candidateVisualizer.setReferencePhoto(id, photo);
+  }
+  if (id === currentStepTargetId) {
+    setSequenceStepImage(photo);
+  }
+}
+
+function setSequenceStepImage(photo) {
+  if (!sequenceStepImage) {
+    return;
+  }
+  if (!photo) {
+    sequenceStepImage.hidden = true;
+    sequenceStepImage.removeAttribute('src');
+    delete sequenceStepImage.dataset.photo;
+    return;
+  }
+  if (sequenceStepImage.dataset.photo !== photo) {
+    sequenceStepImage.dataset.photo = photo;
+    sequenceStepImage.src = photo;
+  }
+  sequenceStepImage.hidden = false;
+}
+
+// 步骤推进时更新“图文步骤卡”：面板顶部展示本步目标物体的参考照与完整指令。
+function updateSequenceStepCard(response) {
+  const stepActive = Boolean(response) &&
+    response.sequenceComplete !== true &&
+    typeof response.stepIndex === 'number' && response.stepIndex >= 0 &&
+    typeof response.stepCount === 'number' && response.stepCount > 0;
+  currentStepTargetId = stepActive && typeof response.targetId === 'string'
+    ? response.targetId
+    : '';
+  if (!sequenceStepCard) {
+    return;
+  }
+  if (!stepActive) {
+    sequenceStepCard.hidden = true;
+    return;
+  }
+  sequenceStepCard.hidden = false;
+  sequenceStepCard.dataset.noConfirm =
+    response.requiresConfirmation === false ? 'true' : 'false';
+  if (sequenceStepProgress) {
+    sequenceStepProgress.textContent =
+      `第 ${response.stepIndex + 1}/${response.stepCount} 步`;
+  }
+  if (sequenceStepInstruction) {
+    sequenceStepInstruction.textContent =
+      response.instruction || response.targetName || response.targetId || '';
+  }
+  if (sequenceStepCaption) {
+    const name = response.targetName || response.targetId || '';
+    sequenceStepCaption.textContent = name;
+    sequenceStepCaption.hidden = !name;
+  }
+  const photo = objectPhotos.get(currentStepTargetId) || '';
+  setSequenceStepImage(photo);
+  if (!photo && currentStepTargetId) {
+    requestObjectPhotos([{ id: currentStepTargetId }]);
+  }
 }
 
 function setupGuidanceDataChannel() {
@@ -536,6 +714,19 @@ function handleGuidanceResponse(response) {
     return;
   }
 
+  if (Array.isArray(response.supportedLayoutDensities)) {
+    layoutLocked = response.layoutLocked === true;
+    if (Number.isInteger(response.layoutSeed)) layoutSeed = response.layoutSeed;
+    layoutDensityButtons.forEach(button => {
+      button.hidden = !response.supportedLayoutDensities.includes(button.dataset.layoutDensity);
+    });
+    setLayoutDensityButtonsDisabled(false);
+    if (response.density) {
+      setLayoutDensitySelected(response.density);
+      setLayoutDensityStatus('', 'ready');
+    }
+  }
+
   const modeLabels = {
     none: '无提示',
     highlight: '物体高亮'
@@ -543,18 +734,42 @@ function handleGuidanceResponse(response) {
   const label = modeLabels[response.mode] || response.mode || '';
 
   if (response.type === 'layout_density_applied') {
-    const density = response.density || 'unknown';
     if (response.ok) {
-      setLayoutDensityStatus(
-        `${density}：已生成 ${response.generatedCount ?? 0} 个物体`,
-        'ready');
-      setLayoutDensitySelected(density);
+      setLayoutDensityStatus('', 'ready');
+      setLayoutDensitySelected(response.density || 'unknown');
       setLayoutDensityButtonsDisabled(false);
       requestObjectCatalog();
     } else {
       setLayoutDensityStatus(response.message || '场景密度切换失败', 'error');
       setLayoutDensityButtonsDisabled(false);
     }
+    return;
+  }
+
+  if (response.type === 'layout_spec_applied') {
+    setLayoutVariantButtonsDisabled(false);
+    if (response.ok) {
+      const index = Number.isInteger(response.runtimeVariant)
+        ? response.runtimeVariant : pendingRuntimeVariantIndex;
+      pendingRuntimeVariantIndex = null;
+      if (index !== null && index >= 0) {
+        const used = readUsedRuntimeVariants();
+        used.add(String(index));
+        writeUsedRuntimeVariants(used);
+      }
+      setLayoutVariantStatus('', 'ready');
+      requestObjectCatalog();
+    } else {
+      pendingRuntimeVariantIndex = null;
+      setLayoutVariantStatus(response.message || '新布局装载失败', 'error');
+    }
+    return;
+  }
+
+  if (response.type === 'layout_spec_cleared') {
+    setLayoutVariantButtonsDisabled(false);
+    setLayoutVariantStatus(response.ok ? '' : (response.message || '恢复默认布局失败'),
+      response.ok ? 'ready' : 'error');
     return;
   }
 
@@ -579,23 +794,51 @@ function handleGuidanceResponse(response) {
       response.placementZoneVisuals || []);
     if (response.sequenceComplete) {
       setSequenceStatus('连续任务已完成', 'ready');
+      updateSequenceStepCard(null);
     } else if (response.stepIndex >= 0 && response.stepCount > 0) {
       const target = response.instruction || response.targetName || response.targetId || '当前目标';
       setSequenceStatus(
         `第 ${response.stepIndex + 1}/${response.stepCount} 步：${target}`,
         'ready');
+      updateSequenceStepCard(response);
     } else {
       setSequenceStatus('连续任务未开始', 'pending');
+      updateSequenceStepCard(null);
     }
+    return;
+  }
+
+  if (response.type === 'heating_state') {
+    const states = {
+      idle: '加热待开始', filtrate_not_ready: '滤液尚未转入蒸发皿',
+      remove_filter_funnel: '过滤漏斗待取下', mount_heating_dish: '蒸发皿待安装至支撑环',
+      place_heating_lamp: '酒精灯待安装至支架底座', heating_assembly_incomplete: '加热装置尚未安装完整',
+      remove_lamp_cap: '酒精灯帽待取下', bring_lighter_to_wick: '等待点火',
+      heating_solution: '加热浓缩中', cover_lamp_to_finish: '浓缩已达目标，等待盖帽熄火',
+      heating_paused: '加热已暂停', concentration_completed: '已熄火，浓缩完成',
+      cooling_solution: '已熄火，冷却中', crystallization_completed: '蓝色晶体已析出，实验完成'
+    };
+    const volume = value => Number.isFinite(value) ? value.toFixed(1) : '--';
+    liquidStatus.hidden = false;
+    liquidStatus.textContent = `${states[response.message] || response.message} · 蒸发皿 ${volume(response.dishMl)} mL · 目标剩余 ${volume(response.heatingTargetMl)} mL · 浓缩 ${Math.round((response.heatingProgress || 0) * 100)}% · 酒精灯${response.lampLit ? '燃烧中' : '未点燃'}`;
+    if (response.message === 'cooling_solution') {
+      liquidStatus.textContent = `已熄火，冷却中 · 剩余 ${volume(response.coolingRemainingSeconds)} 秒 · 蒸发皿 ${volume(response.dishMl)} mL`;
+    } else if (response.message === 'crystallization_completed') {
+      liquidStatus.textContent = '蓝色晶体已析出，实验完成';
+    }
+    retryLiquidButton.hidden = false;
+    retryLiquidButton.disabled = !response.canRetryLiquid;
     return;
   }
 
   if (response.type === 'filtration_state') {
     const states = {
-      solution_not_ready: '溶解尚未完成', assembly_two_hands: '漏斗和接收烧杯未同时握持',
-      align_funnel: '漏斗与接收烧杯口未对齐', receiver_upright: '接收烧杯未直立',
-      filter_two_hands: '原烧杯和接收组件未同时握持', filtering: '过滤中',
-      filter_missed: '液流偏离滤纸', remove_funnel: '滤液已收集，漏斗待取下',
+      solution_not_ready: '溶解尚未完成', stand_not_configured: '过滤支架未配置',
+      stand_not_stationary: '铁架台未放稳', install_apparatus: '过滤装置尚未装配完成',
+      mount_funnel_on_stand: '漏斗待安装至支撑环', place_receiver_under_funnel: '接收烧杯待放入底座定位区',
+      hold_beaker_and_rod: '原烧杯和玻璃棒未分别握持', align_glass_rod: '玻璃棒与杯口、滤纸未对齐',
+      filtering: '沿玻璃棒引流过滤中', filter_missed: '引流受阻或液流偏离',
+      collect_receiver: '过滤完成，接收烧杯待取出',
       transfer_two_hands: '接收烧杯和蒸发皿未同时握持', dish_upright: '蒸发皿未放平',
       transfer_missed: '液流偏离蒸发皿', transferring: '转移滤液中',
       filtrate_lost: '剩余液量不足，可重做当前步骤', filtrate_transferred: '滤液已转入蒸发皿'
@@ -621,10 +864,16 @@ function handleGuidanceResponse(response) {
       immerse_rod: '玻璃棒未进入液体', stirring: '搅拌中', dissolved: '溶解完成'
     };
     const volume = value => Number.isFinite(value) ? value.toFixed(1) : '--';
-    liquidStatus.hidden = false;
-    liquidStatus.textContent = `${states[response.message] || response.message} · 量筒 ${volume(response.cylinderMl)} mL · 烧杯 ${volume(response.beakerMl)} mL · 目标 ${volume(response.targetMl)} ± ${volume(response.toleranceMl)} mL · 搅拌 ${Math.round((response.mixingProgress || 0) * 100)}% · 洒漏 ${volume(response.spilledMl)} mL`;
-    retryLiquidButton.hidden = false;
-    retryLiquidButton.disabled = !response.canRetryLiquid;
+    if (response.message === 'idle') {
+      liquidStatus.hidden = true;
+      retryLiquidButton.hidden = true;
+      retryLiquidButton.disabled = true;
+    } else {
+      liquidStatus.hidden = false;
+      liquidStatus.textContent = `${states[response.message] || response.message} · 量筒 ${volume(response.cylinderMl)} mL · 烧杯 ${volume(response.beakerMl)} mL · 目标 ${volume(response.targetMl)} ± ${volume(response.toleranceMl)} mL · 搅拌 ${Math.round((response.mixingProgress || 0) * 100)}% · 洒漏 ${volume(response.spilledMl)} mL`;
+      retryLiquidButton.hidden = false;
+      retryLiquidButton.disabled = !response.canRetryLiquid;
+    }
     return;
   }
 
@@ -705,6 +954,11 @@ function handleGuidanceResponse(response) {
     return;
   }
 
+  if (response.type === 'object_photo') {
+    handleObjectPhoto(response);
+    return;
+  }
+
   if (response.type === 'guidance_target_shown') {
     setGuidanceStatus(
       `${label}：${response.targetName || '目标'} 已显示`,
@@ -738,9 +992,11 @@ function handleGuidanceResponse(response) {
   if (response.type === 'guidance_ready' ||
       response.type === 'guidance_mode_applied' ||
       response.type === 'trial_ready') {
-    setGuidanceStatus(
-      response.ok ? `${label} 已在 Unity 中生效` : response.message,
-      response.ok ? 'ready' : 'error');
+    if (response.ok) {
+      setGuidanceStatus('', 'ready');
+    } else {
+      setGuidanceStatus(response.message, 'error');
+    }
     return;
   }
 
@@ -843,8 +1099,106 @@ function setLayoutDensitySelected(density) {
 
 function setLayoutDensityButtonsDisabled(disabled) {
   layoutDensityButtons.forEach(button => {
-    button.disabled = disabled;
+    button.disabled = disabled || layoutLocked || button.hidden;
   });
+}
+
+function setupLayoutVariantControls() {
+  if (randomLayoutButton) {
+    randomLayoutButton.addEventListener('click', () => {
+      applyRandomRuntimeLayout();
+    });
+  }
+}
+
+function setLayoutVariantStatus(message, state) {
+  if (!layoutVariantStatus) {
+    return;
+  }
+  layoutVariantStatus.textContent = message;
+  layoutVariantStatus.dataset.state = state;
+}
+
+function setLayoutVariantButtonsDisabled(disabled) {
+  if (randomLayoutButton) {
+    randomLayoutButton.disabled = disabled;
+  }
+}
+
+function readUsedRuntimeVariants() {
+  try {
+    const raw = window.localStorage.getItem(RUNTIME_LAYOUT_USED_KEY) || '[]';
+    return new Set(JSON.parse(raw).map(String));
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function writeUsedRuntimeVariants(used) {
+  try {
+    window.localStorage.setItem(RUNTIME_LAYOUT_USED_KEY,
+      JSON.stringify(Array.from(used)));
+  } catch (error) {
+    // localStorage may be unavailable; usage tracking is best-effort.
+  }
+}
+
+async function applyRandomRuntimeLayout() {
+  if (layoutLocked) {
+    setLayoutVariantStatus('当前试次进行中，暂不能更换布局', 'error');
+    return;
+  }
+
+  setLayoutVariantStatus('正在装载新布局…', 'pending');
+  setLayoutVariantButtonsDisabled(true);
+
+  try {
+    const manifestResponse = await fetch('/layouts/index.json', { cache: 'no-store' });
+    if (!manifestResponse.ok) {
+      throw new Error(`布局清单不可用 (${manifestResponse.status})`);
+    }
+    const manifest = await manifestResponse.json();
+    const layouts = Array.isArray(manifest.layouts) ? manifest.layouts : [];
+    if (layouts.length === 0) {
+      throw new Error('布局库为空');
+    }
+
+    const used = readUsedRuntimeVariants();
+    let candidates = layouts.filter(entry => !used.has(String(entry.index)));
+    if (candidates.length === 0) {
+      // All variants consumed: start a new cycle.
+      used.clear();
+      writeUsedRuntimeVariants(used);
+      candidates = layouts.slice();
+    }
+
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+    const specResponse = await fetch(`/layouts/${picked.file}`, { cache: 'no-store' });
+    if (!specResponse.ok) {
+      throw new Error(`布局文件不可用 (${specResponse.status})`);
+    }
+    const specText = await specResponse.text();
+
+    pendingRuntimeVariantIndex = picked.index;
+    const sent = sendGuidanceCommand({
+      type: 'apply_layout_spec',
+      spec: specText,
+      variantIndex: picked.index,
+      variantSeed: Number.isInteger(picked.seed) ? picked.seed : -1
+    });
+    if (!sent) {
+      pendingRuntimeVariantIndex = null;
+      setLayoutVariantStatus('请先连接 Unity 串流', 'disconnected');
+      setLayoutVariantButtonsDisabled(false);
+      return;
+    }
+
+    setLayoutVariantStatus(`布局 #${picked.index} 装载中…`, 'pending');
+  } catch (error) {
+    pendingRuntimeVariantIndex = null;
+    setLayoutVariantStatus(`装载失败：${error.message}`, 'error');
+    setLayoutVariantButtonsDisabled(false);
+  }
 }
 
 function sendGazeToUnity(gaze) {

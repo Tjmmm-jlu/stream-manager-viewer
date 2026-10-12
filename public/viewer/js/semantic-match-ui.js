@@ -6,7 +6,6 @@ const REQUIRED_ELEMENT_KEYS = [
   'form',
   'input',
   'submitButton',
-  'status',
   'results',
   'slots',
   'preferredId',
@@ -24,6 +23,42 @@ const REASON_MESSAGES = {
   no_compatible_candidate: '没有物体同时满足全部识别属性',
   transcript_not_final: '语音转写尚未结束'
 };
+
+// Unity 目录中的状态/内容物为英文代码值，此处映射为面向用户的简洁中文，
+// 供“画面外”且无缓存截图时展示属性摘要。
+const STATE_VALUE_LABELS = Object.freeze({
+  none: '',
+  empty: '空',
+  filled: '已装填',
+  water: '清水',
+  copper_sulfate: '硫酸铜',
+  copper_sulfate_solution: '硫酸铜溶液',
+  copper_sulfate_crystals_and_mother_liquor: '硫酸铜晶体与母液',
+  insoluble_residue: '不溶残渣',
+  filtrate: '滤液',
+  filtered: '已过滤',
+  dissolved: '已溶解',
+  mixed: '已混合',
+  heated: '已加热',
+  cooled: '已冷却',
+  concentrated: '已浓缩',
+  crystallized: '已结晶',
+  prepared: '已备好',
+  clean: '洁净',
+  rinsed: '已冲洗'
+});
+
+function labelForStateValue(value) {
+  const key = String(value || '').trim();
+  if (!key) {
+    return '';
+  }
+  if (Object.prototype.hasOwnProperty.call(STATE_VALUE_LABELS, key)) {
+    return STATE_VALUE_LABELS[key];
+  }
+  // 未识别的纯 ASCII 代码值不直接展示；含中文等字符的值原样保留。
+  return /^[\x20-\x7e]+$/.test(key) ? '' : key;
+}
 
 function assertElements(elements) {
   REQUIRED_ELEMENT_KEYS.forEach((key) => {
@@ -93,8 +128,12 @@ export function createSemanticMatchController(elements, options = {}) {
   let manualSelection = false;
   let candidateVisuals = [];
   let latestGaze = null;
+  let gazeRankingEnabled = true;
 
   function setStatus(message, state) {
+    if (!elements.status) {
+      return;
+    }
     elements.status.textContent = message;
     elements.status.dataset.state = state;
   }
@@ -119,6 +158,22 @@ export function createSemanticMatchController(elements, options = {}) {
     if (candidateId && typeof options.onCandidateSelected === 'function') {
       options.onCandidateSelected(candidateId);
     }
+  }
+
+  function describeOffscreenCandidate(candidateId) {
+    const object = catalog.find(item => item.id === candidateId);
+    if (!object) {
+      return '';
+    }
+    const parts = [];
+    const push = (label) => {
+      if (label && !parts.includes(label)) {
+        parts.push(label);
+      }
+    };
+    (object.stateTags || []).forEach(tag => push(labelForStateValue(tag)));
+    push(labelForStateValue(object.contents));
+    return parts.slice(0, 3).join(' · ');
   }
 
   function renderSlots(slotEntries) {
@@ -168,6 +223,8 @@ export function createSemanticMatchController(elements, options = {}) {
       thumbnail.width = 160;
       thumbnail.height = 90;
       thumbnail.dataset.candidateId = candidate.id;
+      thumbnail.dataset.offscreenLabel =
+        describeOffscreenCandidate(candidate.id);
       const thumbnailStatus = document.createElement('span');
       thumbnailStatus.className = 'semantic-thumbnail-status';
       thumbnailStatus.dataset.thumbnailStatus = '';
@@ -227,6 +284,9 @@ export function createSemanticMatchController(elements, options = {}) {
   }
 
   function applyGazeRanking() {
+    if (!gazeRankingEnabled) {
+      return;
+    }
     if (!lastResult || !Array.isArray(lastResult.candidates) ||
         lastResult.candidates.length < 2) {
       return;
@@ -308,7 +368,7 @@ export function createSemanticMatchController(elements, options = {}) {
     selectCandidate('');
     setStatus(
       catalog.length > 0
-        ? `已载入 ${catalog.length} 个物体`
+        ? ''
         : REASON_MESSAGES.empty_catalog,
       catalog.length > 0 ? 'ready' : 'pending');
   }
@@ -337,7 +397,7 @@ export function createSemanticMatchController(elements, options = {}) {
         return;
       }
 
-      setStatus(`已载入 ${catalog.length} 个物体`, 'ready');
+      setStatus('', 'ready');
       if (elements.input.value.trim()) {
         runMatch();
       }
@@ -353,6 +413,9 @@ export function createSemanticMatchController(elements, options = {}) {
     setCandidateVisuals(visuals) {
       candidateVisuals = Array.isArray(visuals) ? visuals : [];
       applyGazeRanking();
+    },
+    setGazeRankingEnabled(enabled) {
+      gazeRankingEnabled = enabled !== false;
     },
     runMatch,
     getLastResult() {
